@@ -1,6 +1,72 @@
 # EasyRecruit ATS 3.0 — Changelog
 
-## v20 (Current) — Auth Page: Professional Icons + Accessibility + Password Visibility
+## v21 (Current) — Security & Accuracy Fixes: XSS, Keyword Matching, Data Cleanups
+
+### Overview
+A security audit and code-quality pass that fixed a cross-site scripting
+vulnerability in the frontend, several keyword-matching bugs in the scoring
+engine that caused false positives/negatives on Indian resumes, duplicate
+data in the skill-weights dictionary, and empty-string entries polluting
+the dataset resource files.
+
+### `frontend/index.html` — XSS vulnerability fixed
+- **Fixed**: multiple `innerHTML` assignments were rendering backend data
+  (candidate names, emails, phone numbers, skill names, recommendation text,
+  filenames) into the DOM without HTML-escaping. A crafted resume or
+  candidate name containing `<script>` tags or event-handler attributes
+  would execute arbitrary JavaScript in any recruiter's browser viewing
+  that candidate's analysis. All user-controlled values are now passed
+  through the existing `escH()` HTML-escape helper before insertion.
+  Affected: the analysis history table, candidate list items, candidate
+  cards, candidate detail modal (header, contact info, skill badges,
+  recommendations, all-scans table).
+- **Fixed**: removed a duplicate `display` CSS attribute on the
+  `#detectedDomainBadge` element (had both `display:none` and
+  `display:inline-block` in the same `style` attribute — the last one
+  won, making the badge visible on page load instead of hidden until
+  domain detection runs).
+
+### `app/nlp/enhanced_scorer.py` — scoring accuracy fixes
+- **Fixed**: duplicate `design_tools` key in `SKILL_WEIGHTS` dictionary —
+  the second definition (weight 2.0) silently overwrote the first (weight
+  2.5), making civil-engineering design tools scored lower than intended.
+  Removed the duplicate entry.
+- **Fixed**: `"be "` and `"ba "` in the education-scoring keyword list used
+  a trailing space as a word-boundary hack — this missed "BE" at end-of-line
+  or before punctuation, and the space was stripped by `.lower()` in some
+  edge cases. Replaced with proper word-boundary regex matching
+  (`(?<![a-z])be(?![a-z])`) for all short (≤3 char) alphabetic keywords,
+  preventing false matches inside words like "been", "bank", "based".
+- **Fixed**: same trailing-space issue on `"nit "` in the
+  `_edu_breakdown` method's institute detection — changed to word-boundary
+  regex so "nit" no longer matches inside "candidate" or "annotation".
+
+### `app/nlp/keyword_extractor.py` — domain detection accuracy fixes
+- **Fixed**: `"nit "` in `PREMIUM_INDIAN_INSTITUTES` had a trailing space
+  that prevented matching "NIT" at end-of-line or before punctuation.
+  Changed to `"nit"` with word-boundary regex matching in the
+  `detect_indian_context` loop, so it no longer matches inside unrelated
+  words like "candidate" or "annotation".
+- **Fixed**: company-tier detection in `detect_indian_context` silently
+  overwrote `detected_tier` — if a resume mentioned both an IT-services
+  company (e.g. TCS) and a product company (e.g. Zoho), the product-company
+  loop would overwrite the IT-services tier. Now preserves the first tier
+  detected and only sets it if not already assigned.
+
+### `datasets/*/resources.json` — data cleanup
+- **Fixed**: removed empty-string entries (`""`) from the `tags` arrays in
+  all three resource files (`commerce`, `cse`, `ece_eee`). These empty
+  tags were invisible in the UI but inflated tag counts and could appear
+  as empty chips in some render contexts.
+
+### Verified against
+- Python AST parse of all changed `.py` files (syntax valid).
+- All dataset JSON files validated as parseable after cleanup.
+- Frontend: confirmed `escH()` function exists and is now called 46 times
+  across all `innerHTML` insertion points; confirmed duplicate `display`
+  attribute is removed.
+
+## v20 — Auth Page: Professional Icons + Accessibility + Password Visibility
 
 ### Overview
 Replaced the emoji role icons on the sign-up page with custom, professional

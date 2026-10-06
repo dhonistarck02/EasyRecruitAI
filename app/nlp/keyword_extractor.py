@@ -15,7 +15,16 @@ import os
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
-import spacy
+try:
+    import spacy
+    _SPACY_AVAILABLE = True
+except ImportError:
+    _SPACY_AVAILABLE = False
+    spacy = None
+    logging.getLogger(__name__).warning(
+        "spaCy not installed — using blank model fallback. "
+        "NER-based name extraction will be limited."
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -513,14 +522,18 @@ class KeywordExtractor:
     def __init__(self, model: Optional[str] = None):
         from app.config import settings
         model = model or settings.SPACY_MODEL
-        try:
-            self.nlp = spacy.load(model)
-            logger.info(f"spaCy loaded: {model}")
-        except OSError:
-            logger.warning(f"spaCy model '{model}' not found — using blank model.")
-            self.nlp = spacy.blank("en")
-            if "sentencizer" not in self.nlp.pipe_names:
-                self.nlp.add_pipe("sentencizer")
+        if not _SPACY_AVAILABLE:
+            logger.warning("spaCy not installed — keyword extraction will use regex-only mode (reduced accuracy).")
+            self.nlp = None
+        else:
+            try:
+                self.nlp = spacy.load(model)
+                logger.info(f"spaCy loaded: {model}")
+            except OSError:
+                logger.warning(f"spaCy model '{model}' not found — using blank model.")
+                self.nlp = spacy.blank("en")
+                if "sentencizer" not in self.nlp.pipe_names:
+                    self.nlp.add_pipe("sentencizer")
 
         self._kb = _load_json(_KB_PATH, "Kaggle skill KB")
         self._india_kb = _load_json(_INDIA_KB_PATH, "India hiring KB")
@@ -852,12 +865,17 @@ class KeywordExtractor:
         """Extract top keywords from text using spaCy + frequency. Never throws."""
         try:
             STOP = STOPWORDS
-            doc = self.nlp(text[:5000])
-            freq: Counter = Counter()
-            for token in doc:
-                w = token.text.lower().strip()
-                if len(w) >= 3 and w not in STOP and w.isalpha():
-                    freq[w] += 1
+            if self.nlp is not None:
+                doc = self.nlp(text[:5000])
+                freq: Counter = Counter()
+                for token in doc:
+                    w = token.text.lower().strip()
+                    if len(w) >= 3 and w not in STOP and w.isalpha():
+                        freq[w] += 1
+            else:
+                # Regex-only fallback when spaCy is unavailable
+                words = re.findall(r'\b[a-zA-Z]{3,}\b', text[:5000].lower())
+                freq = Counter(w for w in words if w not in STOP)
             result = []
             counts = freq.most_common(top_k * 2)
             max_freq = counts[0][1] if counts else 1
@@ -951,7 +969,7 @@ class KeywordExtractor:
         one. Returns [] if the loaded spaCy pipeline has no NER component
         (e.g. the blank-model fallback used when en_core_web_sm isn't
         installed)."""
-        if "ner" not in getattr(self.nlp, "pipe_names", []):
+        if self.nlp is None or "ner" not in getattr(self.nlp, "pipe_names", []):
             return []
         head = text[:800]
         try:

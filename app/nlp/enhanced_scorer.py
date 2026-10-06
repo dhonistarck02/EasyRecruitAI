@@ -19,9 +19,21 @@ import socket
 import logging
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
+try:
+    import numpy as np
+    from sentence_transformers import SentenceTransformer
+    from sklearn.metrics.pairwise import cosine_similarity
+    _ML_AVAILABLE = True
+except ImportError as _import_err:
+    _ML_AVAILABLE = False
+    np = None
+    SentenceTransformer = None
+    cosine_similarity = None
+    logging.getLogger(__name__).warning(
+        "numpy/sentence-transformers/sklearn not installed — "
+        "semantic similarity scoring is disabled. "
+        "Keyword, skill, structure, experience, and education scoring still work."
+    )
 
 from app.config import settings
 
@@ -466,8 +478,12 @@ class EnhancedScorer:
 
     def __init__(self, model_name: Optional[str] = None):
         model_name = model_name or settings.SENTENCE_TRANSFORMER_MODEL
-        logger.info(f"Loading sentence-transformer: {model_name}")
-        self.model = self._load_model_safely(model_name)
+        if not _ML_AVAILABLE:
+            logger.warning("ML dependencies unavailable — EnhancedScorer running without semantic similarity.")
+            self.model = None
+        else:
+            logger.info(f"Loading sentence-transformer: {model_name}")
+            self.model = self._load_model_safely(model_name)
         self._extractor = None
 
     @staticmethod
